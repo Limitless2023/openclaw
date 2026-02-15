@@ -14,6 +14,18 @@ export function formatBillingErrorMessage(provider?: string): string {
 export const BILLING_ERROR_USER_MESSAGE = formatBillingErrorMessage();
 
 const RATE_LIMIT_ERROR_USER_MESSAGE = "⚠️ API rate limit reached. Please try again later.";
+const OVERLOADED_ERROR_USER_MESSAGE =
+  "The AI service is temporarily overloaded. Please try again in a moment.";
+
+function formatRateLimitOrOverloadedErrorCopy(raw: string): string | undefined {
+  if (isRateLimitErrorMessage(raw)) {
+    return RATE_LIMIT_ERROR_USER_MESSAGE;
+  }
+  if (isOverloadedErrorMessage(raw)) {
+    return OVERLOADED_ERROR_USER_MESSAGE;
+  }
+  return undefined;
+}
 
 export function isContextOverflowError(errorMessage?: string): boolean {
   if (!errorMessage) {
@@ -463,12 +475,13 @@ export function formatAssistantErrorText(
     return `LLM request rejected: ${invalidRequest[1]}`;
   }
 
-  if (isRateLimitErrorMessage(raw)) {
-    return RATE_LIMIT_ERROR_USER_MESSAGE;
+  const transientCopy = formatRateLimitOrOverloadedErrorCopy(raw);
+  if (transientCopy) {
+    return transientCopy;
   }
 
-  if (isOverloadedErrorMessage(raw)) {
-    return "The AI service is temporarily overloaded. Please try again in a moment.";
+  if (isTimeoutErrorMessage(raw)) {
+    return "LLM request timed out.";
   }
 
   if (isBillingErrorMessage(raw)) {
@@ -523,11 +536,9 @@ export function sanitizeUserFacingText(text: string, opts?: { errorContext?: boo
     }
 
     if (ERROR_PREFIX_RE.test(trimmed)) {
-      if (isRateLimitErrorMessage(trimmed)) {
-        return RATE_LIMIT_ERROR_USER_MESSAGE;
-      }
-      if (isOverloadedErrorMessage(trimmed)) {
-        return "The AI service is temporarily overloaded. Please try again in a moment.";
+      const prefixedCopy = formatRateLimitOrOverloadedErrorCopy(trimmed);
+      if (prefixedCopy) {
+        return prefixedCopy;
       }
       if (isTimeoutErrorMessage(trimmed)) {
         return "LLM request timed out.";
@@ -561,7 +572,13 @@ const ERROR_PATTERNS = {
     "usage limit",
   ],
   overloaded: [/overloaded_error|"type"\s*:\s*"overloaded_error"/i, "overloaded"],
-  timeout: ["timeout", "timed out", "deadline exceeded", "context deadline exceeded"],
+  timeout: [
+    "timeout",
+    "timed out",
+    "deadline exceeded",
+    "context deadline exceeded",
+    /without sending (?:any )?chunks?/i,
+  ],
   billing: [
     /["']?(?:status|code)["']?\s*[:=]\s*402\b|\bhttp\s*402\b|\berror(?:\s+code)?\s*[:=]?\s*402\b|\b(?:got|returned|received)\s+(?:a\s+)?402\b|^\s*402\s+payment/i,
     "payment required",
